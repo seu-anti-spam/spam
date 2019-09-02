@@ -2,20 +2,19 @@
 # -*- coding: utf-8 -*-
 
 import os
-import pickle
 import pyzmail
 import re
-import filter2
 import Lgmail
-import NewSign
 
+from socket import *
 from smtplib import SMTP_SSL
 from imapclient import IMAPClient
 from email.mime.text import MIMEText
 
-white_list = ['default']  # 本地白名单
-black_list = ['default']  # 本地黑名单
-save_paths = {}  # 附件本地保存位置
+white_list = []  # 本地白名单
+black_list = []  # 本地黑名单
+special_list = []  # 本地特别关心表
+save_path = 'C:\\attach'  # 附件本地保存位置
 
 class Imapmail(object):
     '''
@@ -38,18 +37,6 @@ class Imapmail(object):
 
         self.received_mails = {'垃圾邮件': list(), '正常邮件': list()}  # 存储往期邮件
 
-        global white_list
-        global black_list
-
-        #  建立连接
-        #  获取用户个人黑白名单 保存在 white_list和black_list里面
-        #  断开连接
-        # 获取与该用户绑定的个人白名单和黑名单
-        # 加载本地白名单 黑名单
-        pickle_file_white = open('white_list.pkl', 'rb')
-        white_list = pickle.load(pickle_file_white)
-        pickle_file_black = open('black_list.pkl', 'rb')
-        black_list = pickle.load(pickle_file_black)
 
 
     def client(self):  # 链接imap服务器 得到server
@@ -62,16 +49,16 @@ class Imapmail(object):
     def login(self):  # 邮箱登录
         try:
             self.server.login(self.user, self.password)
-            global save_paths
-            #  加载附件下载地址
-            pickle_file_save_path = open('save_paths.pkl', 'rb')
-            save_paths = pickle.load(pickle_file_save_path)
-            #  附件下载地址
-            if self.user not in save_paths.keys():
-                save_paths.update({self.user: 'D:\\k_g'})
-                pickle_file = open('save_paths.pkl', 'wb')
-                pickle.dump(save_paths, pickle_file)
-                pickle_file.close()
+            # global save_paths
+            # #  加载附件下载地址
+            # pickle_file_save_path = open('save_paths.pkl', 'rb')
+            # save_paths = pickle.load(pickle_file_save_path)
+            # #  附件下载地址
+            # if self.user not in save_paths.keys():
+            #     save_paths.update({self.user: 'D:\\k_g'})
+            #     pickle_file = open('save_paths.pkl', 'wb')
+            #     pickle.dump(save_paths, pickle_file)
+            #     pickle_file.close()
 
         except BaseException as e:
             return 0
@@ -107,8 +94,8 @@ class Imapmail(object):
 
     def get_attach(self, mg):  # 获取附件
         global save_paths
-        if not os.path.exists(save_paths[self.user]):  # 判断下载目录是否存在，不存在就创建一个
-            os.mkdir(save_paths[self.user])
+        if not os.path.exists(save_path):  # 判断下载目录是否存在，不存在就创建一个
+            os.mkdir(save_path)
         msg_dict = self.server.fetch(mg, ['BODY[]'])  # 获取邮件内容
         mail_body = msg_dict[mg][b'BODY[]']  # 获取邮件内容
         message = pyzmail.PyzMessage.factory(mail_body)
@@ -117,11 +104,9 @@ class Imapmail(object):
             if part.filename:
                 num += 1
                 filename_save = message.get_address('from')[1] + '_' + part.filename
-                down_path = os.path.join(save_paths[self.user], filename_save)
-                #  print('附件保存地址为：%s' % down_path)
+                down_path = os.path.join(save_path, filename_save)
                 with open(down_path, 'wb') as f:
                     f.write(part.get_payload())
-                #  print('下载完毕')
 
     def get_content(self, mg):
         data = self.server.fetch(mg, ['ENVELOPE'])
@@ -136,8 +121,9 @@ class Imapmail(object):
         subject = self.messageObj.get_subject()
         send = str(self.messageObj.get_addresses('from')[0][1])
         send_time = str(dates)
+        to = str(self.messageObj.get_addresses('to')[0][1])
         message_Content = '内容为空'
-        mail = {'垃圾': 0, '主题': subject, '发件人': send, '时间': send_time,
+        mail = {'垃圾': 0, '主题': subject, '发件人': send, '收件人' : to, '时间': send_time,
                 'IP地址': ip, '主要内容': message_Content, '邮件': None, '附件': 0}
         if self.if_exist_attach(mg):
             mail['附件'] = 1
@@ -155,7 +141,7 @@ class Imapmail(object):
             pass
         return mail
 
-    def get_new_mail(self,normDict, spamDict,health_dic, spam_dic, health_sum, spam_sum):  # 监听最新邮件
+    def get_new_mail(self):  # 监听最新邮件
         count = 0
         self.get_result()
         mails = list()
@@ -165,42 +151,52 @@ class Imapmail(object):
         if count == 0:
             print('邮件总数:' + str(self.size))
         else:
-            #  建立连接
             print('邮件总数:' + str(self.size))
-            for each_mail in self.result[temp:self.size]:
-                mail = self.get_content(each_mail)
-                mail['邮件'] = each_mail
-                if mail['发件人'] in white_list:
-                    pass
-                elif mail['发件人'] in black_list:
-                    #  self.previous -= 1
-                    mail['垃圾'] = 1
-                    mails.append(mail)
-                    self.send_back(mail)
-                else:
-                    # 由公共黑名单或者算法进行判断
-                    # 根据结果更新词条垃圾的值
-                    # 云端判断邮件垃圾与否
-                    chnum, ennum, allnum, chp = self.number(mail['主要内容'])
-                    if chp > 0.9:
-                        div = filter2.Get_Email_Div(mail['主要内容'])
-                        result = filter2.Get_Bayes_Num(div, spamDict, normDict, 7063, 7775)
-                    else:
-                        result = filter2.Bayes(mail['主要内容'], ennum,health_dic, spam_dic, health_sum, spam_sum)
-
-                    if result == 1:
+            address = '42.159.155.29'
+            port = 8000
+            s = socket(AF_INET, SOCK_STREAM)
+            try:
+                s.connect((address, port))
+                for each_mail in self.result[temp:self.size]:
+                    mail = self.get_content(each_mail)
+                    if mail['发件人'] in special_list:
+                        mail['垃圾'] = 2  # 特别关心
+                        self.received_mails['正常邮件'].append(mail)
+                    elif mail['发件人'] in black_list:
                         mail['垃圾'] = 1
-                        #  self.send_back(mail)
+                        self.received_mails['垃圾邮件'].append(mail)
+                    elif mail['发件人'] in white_list:
+                        mail['垃圾'] = 0
+                        self.received_mails['正常邮件'].append(mail)
                     else:
-                        pass
-                    mails.append(mail)
-                #  断开连接
+                        mail['邮件'] = each_mail
+                        # 由公共黑名单或者算法进行判断
+                        # 根据结果更新词条垃圾的值
+                        # 云端判断邮件垃圾与否
+                        temp = dict()
+                        temp.update({'功能': 'mail'})
+                        temp.update({'邮件': mail})
+                        temp.update({'公共黑名单': 1})
+                        s.send(str(temp).encode('utf-8'))
+                        result = int(s.recv(1024).decode('utf-8'))
+                        s.send(str({'功能':'exit'}).encode('utf-8'))
+                        if result == 1:
+                            mail['垃圾'] = 1
+                            #  self.send_back(mail)
+                        else:
+                            pass
+                        mails.append(mail)
+            except BaseException as e:
+                print(e)
+            finally:
+                # 断开连接
+                s.close()
         return mails
 
     def delete_mail(self, mail):
         self.server.delete_messages(mail)
 
-    def get_all_mails(self, normDict, spamDict,health_dic, spam_dic, health_sum, spam_sum):
+    def get_all_mails(self, s):
         self.get_result()
         if self.size == 0:
             print('收件箱为空')
@@ -214,28 +210,27 @@ class Imapmail(object):
                 if temp in Lgmail.extra_list:
                     mail['垃圾'] = 0
                     self.received_mails['正常邮件'].append(mail)
-                elif mail['发件人'] in white_list:
-                    self.received_mails['正常邮件'].append(mail)
                 elif mail['发件人'] in black_list:
                     mail['垃圾'] = 1
                     self.received_mails['垃圾邮件'].append(mail)
+                elif mail['发件人'] in white_list:
+                    mail['垃圾'] = 0
+                    self.received_mails['正常邮件'].append(mail)
                 else:
                     # 由公共黑名单或者算法进行判断
                     # 由公共黑名单或者算法进行判断
                     # 根据结果更新词条垃圾的值
-                    chnum, ennum, allnum,chp = self.number(mail['主要内容'])
-                    if chp > 0.8:
-                         div = filter2.Get_Email_Div(mail['主要内容'])
-                         result = filter2.Get_Bayes_Num(div, spamDict, normDict, 7063, 7775)
-                    else:
-                         result = filter2.Bayes(mail['主要内容'], ennum, health_dic, spam_dic, health_sum, spam_sum)
-                    result = 1
+                    temp = dict()
+                    temp.update({'功能':'mail'})
+                    temp.update({'邮件': mail})
+                    temp.update({'公共黑名单':0})
+                    s.send(str(temp).encode('utf-8'))
+                    result = int(s.recv(1024).decode('utf-8'))
                     if result == 1:
                         mail['垃圾'] = 1
                         self.received_mails['垃圾邮件'].append(mail)
                     else:
                         self.received_mails['正常邮件'].append(mail)
-                        #  self.get_attach(each_mail)
         return self.received_mails
 
     def number(self, content):
@@ -246,7 +241,7 @@ class Imapmail(object):
             if '\u4e00' <= i <= '\u9fff':
                 chnum += 1
                 allnum += 1
-            if (i >= u'\u0041' and i <= u'\u005a') or (i >= u'\u0061' and i <= u'\u007a'):
+            if (u'\u0041' <= i <= u'\u005a') or (u'\u0061' <= i <= u'\u007a'):
                 ennum += 1
                 allnum += 1
         chp = chnum / allnum
@@ -255,21 +250,21 @@ class Imapmail(object):
     def close(self):  # 断开连接
         self.server.logout()
 
-    def add_white(self, name):  # 添加本地白名单
+    def add_white(self, name):  # 添加用户白名单
         global white_list
         if name not in white_list:
             white_list.append(name)
-            pickle_file = open('white_list.pkl', 'wb')
-            pickle.dump(self.white_list, pickle_file)
-            pickle_file.close()
 
-    def add_black(self, name):  # 添加本地黑名单
+
+    def add_black(self, name):  # 添加用户黑名单
         global black_list
         if name not in black_list:
             black_list.append(name)
-            pickle_file = open('white_list.pkl', 'wb')
-            pickle.dump(self.black_list, pickle_file)
-            pickle_file.close()
+
+    def add_special(self, name):  # 添加用户特别关心
+        global special_list
+        if name not in special_list:
+            special_list.append(name)
 
     def send_back(self, mail):  # 自动恢复垃圾邮件
         sender_user = self.user  # 自动回复的发件人

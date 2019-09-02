@@ -2,7 +2,7 @@ import sys
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 import time
-import MainWindow_UI
+import MainWindow
 import imap
 import Normail
 import Lgmail
@@ -10,16 +10,24 @@ import WhiteList
 import BlackList
 import pickle
 import Setting
-import filter2
+import MyMsg
+import WarningBox
+import logging
 
 from socket import *
 from PyQt5.QtGui import *
 
+address = '42.159.155.29'
+port = 8000
+buffsize = 1024
 received_mails = {'垃圾邮件': [], '正常邮件': []}  # 存储往期邮件
+s = socket(AF_INET, SOCK_STREAM)
 flag = 0
+finish = 0
 ################################################
 #######创建主窗口
 ################################################
+
 
 
 class BackendThread(QThread):
@@ -34,39 +42,50 @@ class BackendThread(QThread):
     def run(self):
         global received_mails
         global flag
-
+        global s
+        print('dahjbdja')
         #  连接服务器
-        address = '42.159.155.29'
-        port = 8000
-        buffsize = 1024
-        s = socket(AF_INET, SOCK_STREAM)
-        try:
-            print(s.connect((address, port)))
-        except TimeoutError as e:
-            print(e)
-            normDict, spamDict = filter2.Get_Dict('normal.txt', 'spam.txt')
-            pickle_file = open('health_dic.pkl', 'rb')
-            health_dic = pickle.load(pickle_file)
-            pickle_file.close()
-            pickle_file = open('health_dic.pkl', 'rb')
-            spam_dic = pickle.load(pickle_file)
-        finally:
-            received_mails = self.im.get_all_mails(normDict, spamDict, health_dic, spam_dic, 11850459, 10244975)
-            # 断开连接
-            flag = 1
-            while True:
-                self.result = self.im.get_new_mail(normDict, spamDict, health_dic, spam_dic, 11850459, 10244975)
-                if self.result is not None:
-                    for each in self.result:
-                        if each['垃圾'] == 1:
-                            self.update_email.emit(each)
-                            received_mails['垃圾邮件'].append(each)
-                        else:
-                            received_mails['正常邮件'].append(each)
-                    time.sleep(1)
-                time.sleep(2)
+        temp = dict()
+        temp.update({'功能':'download'})
+        temp.update({'用户': self.im.user})
+        s.send(str(temp).encode('utf-8'))
+        receive = s.recv(buffsize).decode('utf-8')  # 接收结果
+        receive = eval(receive)
+        if receive['result'] == 'exist':
+            black = receive['黑名单'].split()  # 更新本地黑名单
+            white = receive['白名单'].split()  # 接收白名单
+            #  special = receive['特别感谢'].split()  # 接收特别关心
+            if black != '0':
+                imap.black_list = black
+            if white != '0':
+                imap.white_list = white
+            # if special !='0':
+            #     imap.special_list = special
+            imap.save_path = receive['路径']
+        global finish
+        finish = 1
+        received_mails = self.im.get_all_mails(s)
+        s.send(str(dict({'功能':'exit'})).encode('utf-8'))
+        s.close()
 
-class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
+        # 断开连接
+        flag = 1
+        while True:
+            self.result = self.im.get_new_mail()
+            if self.result is not None:
+                for each in self.result:
+                    if each['垃圾'] == 2:
+                        self.update_email.emit(each)
+                        received_mails['正常邮件'].append(each)
+                    elif each['垃圾'] == 1:
+                        self.update_email.emit(each)
+                        received_mails['垃圾邮件'].append(each)
+                    else:
+                        received_mails['正常邮件'].append(each)
+                    time.sleep(1)
+            time.sleep(2)
+
+class MainWindow(QMainWindow, MainWindow.Ui_MainWindow):
     windowList = []
 
     def __init__(self, im, *args, **kwargs):
@@ -85,7 +104,7 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
         # 添加设置按钮
         self.setting = QPushButton(self)
         # self.setting.setText("设置")
-        self.setting.setGeometry(360, 480, 25, 25)
+        self.setting.setGeometry(370, 490, 25, 25)
         self.setting.clicked.connect(lambda: self.onBtn_Setting(self.im.user))
         self.setting.setStyleSheet('''
                                     QPushButton{
@@ -96,7 +115,7 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
 
         # 添加最小化按钮
         self.pushButton_min = QPushButton(self)
-        self.pushButton_min.setGeometry(315, 20, 15, 15)
+        self.pushButton_min.setGeometry(320, 15, 15, 15)
         self.pushButton_min.setToolTip('最小化')
         self.pushButton_min.setObjectName("pushButton_min")
         self.pushButton_min.setStyleSheet('''
@@ -108,7 +127,7 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
 
         # 添加注销按钮
         self.pushButton_logout = QPushButton(self)
-        self.pushButton_logout.setGeometry(QRect(340, 18, 20, 20))
+        self.pushButton_logout.setGeometry(QRect(346, 13.5, 20, 20))
         self.pushButton_logout.setToolTip('注销')
         self.pushButton_logout.setObjectName("pushButton_logout")
         self.pushButton_logout.setStyleSheet('''
@@ -120,7 +139,7 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
 
         # 添加关闭按钮
         self.pushButton_close = QPushButton(self)
-        self.pushButton_close.setGeometry(QRect(370, 20, 15, 15))
+        self.pushButton_close.setGeometry(QRect(375, 15, 15, 15))
         self.pushButton_close.setToolTip('退出')
         self.pushButton_close.setObjectName("pushButton_close")
         self.pushButton_close.setStyleSheet('''
@@ -139,17 +158,22 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
         # self.createMenus()
         # 后台监控邮件
         self.initMonitor()
-        self.pushButton.clicked.connect(self.onBtn_Normail)
-        self.pushButton_2.clicked.connect(self.onBtn_Lgmail)
-        self.pushButton_3.clicked.connect(self.onBtn_WhiteList)
-        self.pushButton_4.clicked.connect(self.onBtn_BlackList)
+        self.normailBtn.clicked.connect(self.onBtn_Normail)
+        self.lgmailBtn.clicked.connect(self.onBtn_Lgmail)
+        self.whiteBtn.clicked.connect(self.onBtn_WhiteList)
+        self.blackBtn.clicked.connect(self.onBtn_BlackList)
 
     def minimized(self):
         self.showMinimized()
 
     def onBtn_Setting(self, str):
-        set = Setting.SettingUi(str)
-        set.exec()
+        if finish == 1:
+            set = Setting.SettingUi(str)
+            set.exec()
+        else:
+            reply = WarningBox.WarningBox('初始化未完成')
+            #  reply = QMessageBox.warning(self, '!', '初始化未完成')
+            reply.show()
 
     def initMonitor(self):
         self.backend = BackendThread(self.im)
@@ -161,30 +185,18 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
         send = content['发件人']
         send_time = content['时间']
         mainContent = content['主要内容']
-        ip = content['IP地址']
-        message = ('您收到1封垃圾邮件\n' + '主题：' + topic + '\n' + '发件人：' + send +
-                   '\n' + 'ip地址：' + ip + '\n' + '时间：' + send_time + '\n' + '主要内容：\n' +
-                   mainContent[:20] + '\n是否需要删除该邮件？')
-        temp = QMessageBox.warning(self, "提示", message, QMessageBox.Yes | QMessageBox.No)
-        if temp == QMessageBox.Yes:
-            self.im.delete_mail(content['邮件'])
+        if content['垃圾'] == 1:
+            ip = content['IP地址']
+            message = ('您收到1封来自'+ send[:20] + '的垃圾邮件\n' + '主题：' + topic[:20] +
+                       '\n' + 'ip地址：' + ip + '\n' + '时间：' + send_time + '\n' + '主要内容：\n' +
+                       mainContent[:20] + '\n'+content['收件人'])
         else:
-            pass
+            message = ('您收到1封来自'+send[:20]+'的特别邮件\n' + '主题：' + topic[:20] +
+                        '\n' + '时间：' + send_time + '\n' + '主要内容：\n' + mainContent[:20])
+        self.temp = MyMsg.MymessageBox(message)
+        self.temp.show()
 
     def createMenus(self):
-        # # 创建动作 注销
-        # self.printAction1 = QAction(self.tr("注销"), self)
-        # self.printAction1.triggered.connect(self.on_printAction1_triggered)
-        #
-        # # 创建动作 退出
-        # self.printAction2 = QAction(self.tr("退出"), self)
-        # self.printAction2.triggered.connect(self.on_printAction2_triggered)
-
-        # 创建菜单，添加动作
-
-        # self.printMenu = self.menuBar().addMenu(self.tr("注销和退出"))
-        # self.printMenu.addAction(self.printAction1)
-        # self.printMenu.addAction(self.printAction2)
         self.pushButton_logout.clicked.connect(self.on_printAction1_triggered)
         self.pushButton_close.clicked.connect(self.on_printAction2_triggered)
 
@@ -194,7 +206,9 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
             normail = Normail.NormailUi(self.im, received_mails)
             normail.exec()
         else:
-            reply = QMessageBox.warning(self, '!', '往期邮件扫描未完成', QMessageBox.Yes)
+            self.reply = WarningBox.WarningBox('往期邮件扫描未完成')
+            # reply = QMessageBox.warning(self, '!', '往期邮件扫描未完成', QMessageBox.Yes)
+            self.reply.show()
 
     def onBtn_Lgmail(self):
         global received_mails
@@ -202,21 +216,52 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
             lgmail = Lgmail.LgmailUi(self.im, Lgmail.extra_list, received_mails)
             lgmail.exec()
         else:
-            reply = QMessageBox.warning(self, '!', '往期邮件扫描未完成', QMessageBox.Yes)
+            self.reply = WarningBox.WarningBox('往期邮件扫描未完成')
+            self.reply.show()
+
 
     def onBtn_WhiteList(self):
-        wdialog = WhiteList.WhiteListUi()
-        wdialog.exec()
+        if finish == 1:
+            wdialog = WhiteList.WhiteListUi()
+            wdialog.exec()
+        else:
+            self.reply = WarningBox.WarningBox('初始化未完成')
+            self.reply.show()
 
     def onBtn_BlackList(self):
-        bdialog = BlackList.BlackListUi()
-        bdialog.exec()
+        if finish == 1:
+            bdialog = BlackList.BlackListUi()
+            bdialog.exec()
+        else:
+            self.reply = WarningBox.WarningBox('初始化未完成')
+            self.reply.show()
 
     # 动作一：注销
+    def update_user(self):
+        s = socket(AF_INET, SOCK_STREAM)
+        s.connect((address, port))
+        temp = dict()
+        temp.update({'功能':'update'})
+        temp.update({'用户':self.im.user})
+        white = " ".join(imap.white_list)
+        black = " ".join(imap.black_list)
+        # special = " ".join(imap.special_list)
+        path = imap.save_path
+        temp.update({'白名单': white})
+        temp.update({'黑名单': black})
+        temp.update({'路径': path})
+        # temp.update({'特别关心': special})
+        s.send(str(temp).encode('utf-8'))
+        temp = dict()
+        temp.update({'功能':'exit'})
+        time.sleep(0.2)
+        s.send(str(temp).encode('utf-8'))
+
     def on_printAction1_triggered(self):
         global received_mails
         received_mails['正常邮件'].clear()
         received_mails['垃圾邮件'].clear()
+        self.update_user()
         self.backend.terminate()
         self.close()
         dialog = logindialog(mode=1)
@@ -232,8 +277,7 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
 
     # 关闭界面触发事件
     def closeEvent(self, event):
-        pass
-
+        self.update_user()
 
 ################################################
 #######对话框
@@ -242,6 +286,12 @@ class MainWindow(QMainWindow, MainWindow_UI.Ui_MainWindow):
 
 class logindialog(QDialog):
     def __init__(self, mode=0, *args, **kwargs):
+        logging.basicConfig(level = logging.INFO,format = '%(asctime)s - %(name)s - %(levelname)s - %(pathname)s')
+        logger = logging.getLogger(__name__)
+        logger.info("Start print log")
+        logger.debug("Do something")
+        logger.warning("Something maybe fail.")
+        logger.info("Finish")
         super().__init__(*args, **kwargs)
         self.im = imap.Imapmail()
         self.mode = mode
@@ -341,7 +391,7 @@ class logindialog(QDialog):
         # QPushButton: hover
         # {background:  # ADD8E6;}
         self.pushButton_close = QPushButton(self)
-        self.pushButton_close.setGeometry(QRect(490, 25, 15, 15))
+        self.pushButton_close.setGeometry(QRect(495, 10, 15, 15))
         self.pushButton_close.setToolTip('退出')
         self.pushButton_close.setObjectName("pushButton_close")
         self.pushButton_close.setStyleSheet('''
@@ -352,7 +402,7 @@ class logindialog(QDialog):
                                             ''')
         # yy 最小化按钮
         self.pushButton_min = QPushButton(self)
-        self.pushButton_min.setGeometry(460, 25, 15, 15)
+        self.pushButton_min.setGeometry(465, 10, 15, 15)
         self.pushButton_min.setToolTip('最小化')
         self.pushButton_min.setObjectName("pushButton_min")
         self.pushButton_min.setStyleSheet('''
@@ -433,25 +483,40 @@ class logindialog(QDialog):
 
     # 验证登录信息
     def on_pushButton_enter_clicked(self):
-        # 账号判断
-        self.im.client()
-        self.im.user = self.lineEdit_account.text()
-        self.im.password = self.lineEdit_password.text()
-        self.im.server_address = 'imap.' + self.im.user.split('@')[-1]  # 邮箱地址
-        if self.im.user.split('@')[-1] in ['163.com', 'qq.com', '126.com']:
-            self.im.client()
-            e = self.im.login()
-            if e == 0:
-                password_replay = QMessageBox.warning(self, "!", "账号或密码输入错误", QMessageBox.Yes)
+        global s
+        s = socket(AF_INET, SOCK_STREAM)
+        s.settimeout(5)
+        if_connect = 0
+        try:
+            s.connect((address, port))
+            if_connect = 1
+        except BaseException as e:
+            print(e)
+            if_connect = 0
+        finally:
+            if if_connect == 1:
+                self.im.client()
+                self.im.user = self.lineEdit_account.text()
+                self.im.password = self.lineEdit_password.text()
+                self.im.server_address = 'imap.' + self.im.user.split('@')[-1]  # 邮箱地址
+                if self.im.user.split('@')[-1] in ['163.com', 'qq.com', '126.com']:
+                    self.im.client()
+                    e = self.im.login()
+                    if e == 0:
+                        reply = WarningBox.WarningBox('账号或密码输入错误')
+                        reply.exec()
+                        s.send(str(dict({'功能':'exit'})).encode('utf-8'))
+                    else:
+                        self.save_login_info()
+                        # 通过验证，关闭对话框并返回1
+                        self.accept()
+                else:
+                    reply = WarningBox.WarningBox('邮箱格式不正确')
+                    reply.exec()
+                    s.send(str(dict({'功能': 'exit'})).encode('utf-8'))
             else:
-                self.save_login_info()
-                # 通过验证，关闭对话框并返回1
-
-                self.accept()
-        else:
-            format_replay = QMessageBox.warning(self, "!", "邮箱格式不正确", QMessageBox.Yes)
-            print('邮箱格式不正确')
-
+                reply = WarningBox.WarningBox('连接服务器失败')
+                reply.exec()
     def get_imap(self):
         return self.im
 
@@ -470,7 +535,6 @@ class logindialog(QDialog):
         the_password = settings.value("password")
         the_remeberpassword = settings.value("remeberpassword")
         the_autologin = settings.value("autologin")
-        ########
         self.lineEdit_account.setText(the_account)
         if the_remeberpassword == "true" or the_remeberpassword == True:
             self.checkBox_remeberpassword.setChecked(True)
@@ -479,7 +543,7 @@ class logindialog(QDialog):
         if the_autologin == "true" or the_autologin == True:
             self.checkBox_autologin.setChecked(True)
 
-    # 鼠标拖动
+    #  鼠标拖动
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.m_flag = True
@@ -497,14 +561,12 @@ class logindialog(QDialog):
         self.setCursor(QCursor(Qt.ArrowCursor))
 
 
-################################################
-#######程序入口
-################################################
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     dialog = logindialog(mode=0)
     im = dialog.get_imap()
-    if dialog.exec_() == QDialog.Accepted:
+    if dialog.exec_()== QDialog.Accepted:
         the_window = MainWindow(im)
         the_window.paintEngine()
         the_window.show()

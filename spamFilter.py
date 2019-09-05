@@ -1,6 +1,5 @@
 # coding=utf-8
 
-import openpyxl
 import numpy as np
 from cleanText import cleanString
 from sklearn.svm import LinearSVC
@@ -9,6 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from joblib import dump, load
 import pickle
+from Bayes import Spam_Bayes
 import os
 
 # Get the original dataset
@@ -111,33 +111,36 @@ def test(model,vectorizer):
 def accuracy(model,vectorizer):
     allnum=0
     cornum=0
+    bayes=Spam_Bayes()
     # path=os.listdir('E:/2019实训/endata1/train0/')
     # for x in path:
-    #     #     f = open('E:/2019实训/endata1/train0/' + x, 'r', errors='ignore')
-    #     #     test = f.read()
-    #     #     f.close()
-    #     #     allnum+=1
-    #     #     result=predict(test,model,vectorizer)
-    #     #     if result=="Not Spam":
-    #     #         print(x+"——"+"Not Spam")
-    #     #         if int(x)<1000:
-    #     #             cornum+=1
-    #     #     else:
-    #     #         print(x+"——"+"Spam")
-    #     #         if int(x)>1000:
-    #     #             cornum+=1
-    #     # print('准确率：' + str(cornum/allnum))
+    #     f = open('E:/2019实训/endata1/train0/' + x, 'r', errors='ignore')
+    #     test = f.read()
+    #     f.close()
+    #     allnum+=1
+    #     result1=predict(test,model,vectorizer)
+    #     result2=bayes.test(test)
+    #     if result1=="Not Spam" and result2=="Not Spam":
+    #         print(x+"——"+"Not Spam")
+    #         if int(x)<1000:
+    #             cornum+=1
+    #     else:
+    #         print(x+"——"+"Spam")
+    #         if int(x)>1000:
+    #             cornum+=1
+    # print('准确率：' + str(cornum/allnum))
     for x in range(1,352):
-        f = open('E:/2019实训/endata1/train0/' + str(x), 'r', errors='ignore')
+        f = open('E:/2019实训/endata1/spam/' + str(x), 'r', errors='ignore')
         test = f.read()
         f.close()
         allnum+=1
-        result=predict(test,model,vectorizer)
-        if result=="Not Spam":
+        result1 = predict(test, model, vectorizer)
+        result2=bayes.test(test)
+        if result1 == "Not Spam" and result2 == "Not Spam":
             print(str(x)+"——"+"Not Spam")
-            cornum+=1
         else:
             print(str(x)+"——"+"Spam")
+            cornum += 1
     print('准确率：' + str(cornum/allnum))
 
 if __name__ == '__main__':

@@ -25,6 +25,10 @@ received_mails = {'垃圾邮件': [], '正常邮件': []}  # 存储往期邮件
 s = socket(AF_INET, SOCK_STREAM)
 flag = 0
 finish = 0
+if_login = dict()
+count = [0]
+AThread = Associate_List.AssoThread()
+
 ################################################
 #######创建主窗口
 ################################################
@@ -38,6 +42,7 @@ class BackendThread(QThread):
         self.im = im
         self.result = list()
         self.im.init()
+
     update_email = pyqtSignal(dict)
 
     def run(self):
@@ -100,10 +105,13 @@ class MainWindow(QMainWindow, MainWindow1.Ui_MainWindow):
         self.printAction1 = None
         self.printAction2 = None
         self.printMenu = None
-
-        pickle_file_2 = open('extra_list.pkl', 'rb')
-        Lgmail.extra_list = pickle.load(pickle_file_2)
+        pickle_file = open('extra_list.pkl', 'rb')
+        Lgmail.extra_list = pickle.load(pickle_file)
         self.setFixedSize(self.width(), self.height())
+        self.setStyleSheet('''
+                            QWidget{
+                                    border-radius:15px;
+                                    border:none;}''')
 
         # 添加设置按钮
         self.setting = QPushButton(self)
@@ -118,7 +126,7 @@ class MainWindow(QMainWindow, MainWindow1.Ui_MainWindow):
 
         # 添加最小化按钮
         self.pushButton_min = QPushButton(self)
-        self.pushButton_min.setGeometry(415, 15, 15, 15)
+        self.pushButton_min.setGeometry(415, 10, 15, 15)
         self.pushButton_min.setToolTip('最小化')
         self.pushButton_min.setObjectName("pushButton_min")
         self.pushButton_min.setStyleSheet('''
@@ -130,7 +138,7 @@ class MainWindow(QMainWindow, MainWindow1.Ui_MainWindow):
 
         # 添加注销按钮
         self.pushButton_logout = QPushButton(self)
-        self.pushButton_logout.setGeometry(QRect(440, 13.5, 20, 20))
+        self.pushButton_logout.setGeometry(QRect(440, 8.5, 20, 20))
         self.pushButton_logout.setToolTip('注销')
         self.pushButton_logout.setObjectName("pushButton_logout")
         self.pushButton_logout.setStyleSheet('''
@@ -142,7 +150,7 @@ class MainWindow(QMainWindow, MainWindow1.Ui_MainWindow):
 
         # 添加关闭按钮
         self.pushButton_close = QPushButton(self)
-        self.pushButton_close.setGeometry(QRect(470, 15, 15, 15))
+        self.pushButton_close.setGeometry(QRect(470, 10, 15, 15))
         self.pushButton_close.setToolTip('退出')
         self.pushButton_close.setObjectName("pushButton_close")
         self.pushButton_close.setStyleSheet('''
@@ -185,6 +193,9 @@ class MainWindow(QMainWindow, MainWindow1.Ui_MainWindow):
             icon = QPixmap("images/background2.jpg")
         elif x == 0:
             icon = QPixmap("images/gray/3.jpg")
+        pickle_file = open('theme.pkl', 'wb')
+        pickle.dump(x, pickle_file)
+        pickle_file.close()
         pal.setBrush(self.backgroundRole(), QBrush(icon.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)))
         self.setPalette(pal)
 
@@ -258,8 +269,12 @@ class MainWindow(QMainWindow, MainWindow1.Ui_MainWindow):
             self.reply.show()
 
     def onBtn_Associate(self):
+        global if_login
+        global count
+        global AThread1
+        global AThread2
         if finish == 1:
-            bdialog = Associate_List.AssociateListUi()
+            bdialog = Associate_List.AssociateListUi(if_login, count, AThread)
             bdialog.exec()
         else:
             self.reply = WarningBox.WarningBox('初始化未完成')
@@ -518,7 +533,9 @@ class Logindialog(QDialog):
         self.timer.setSingleShot(True)
         self.timer.start(1000)
 
-
+        pickle_file = open('theme.pkl', 'rb')
+        self.theme = pickle.load(pickle_file)
+        pickle_file.close()
 
     def minimized(self):
         self.showMinimized()
@@ -528,7 +545,10 @@ class Logindialog(QDialog):
         painter = QPainter(self)
         painter.drawRect(self.rect())
         # pixmap = QPixmap("images/gray/3.jpg")  # 换成自己的图片的相对路径
-        pixmap = QPixmap("images/background1.jpg")
+        if self.theme == 1:
+            pixmap = QPixmap("images/background1.jpg")
+        elif self.theme == 0:
+            pixmap = QPixmap("images/gray/3.jpg")
         painter.drawPixmap(self.rect(), pixmap)
 
     # 自动登录
@@ -550,7 +570,6 @@ class Logindialog(QDialog):
             if_connect = 0
         finally:
             if if_connect == 1:
-                self.im.client()
                 self.im.user = self.lineEdit_account.text()
                 self.im.password = self.lineEdit_password.text()
                 self.im.server_address = 'imap.' + self.im.user.split('@')[-1]  # 邮箱地址
